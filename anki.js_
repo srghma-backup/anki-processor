@@ -1,0 +1,270 @@
+// ==========================================
+// 1. DATA DEFINITIONS
+// ==========================================
+
+/**
+ * Standard Khmer Consonants.
+ * 'series' determines the inherent vowel sound (a = /ɑː/, o = /ɔː/).
+ * @constant {Array<{letter: string, trans: string, series: 'a'|'o'}>}
+ */
+const CONSONANTS = [
+  { letter: "ក", trans: "ка", series: "a" },
+  { letter: "ខ", trans: "кха", series: "a" },
+  { letter: "គ", trans: "ко", series: "o" },
+  { letter: "ឃ", trans: "кхо", series: "o" },
+  { letter: "ង", trans: "нго", series: "o" },
+  { letter: "ច", trans: "тя", series: "a" },
+  { letter: "ឆ", trans: "ча", series: "a" },
+  { letter: "ជ", trans: "тё", series: "o" },
+  { letter: "ឈ", trans: "чо", series: "o" },
+  { letter: "ញ", trans: "нё", series: "o" },
+  { letter: "ដ", trans: "да", series: "a" },
+  { letter: "ឋ", trans: "тха", series: "a" },
+  { letter: "ឌ", trans: "до", series: "o" },
+  { letter: "ឍ", trans: "тхо", series: "o" },
+  { letter: "ណ", trans: "на", series: "a" },
+  { letter: "ត", trans: "та", series: "a" },
+  { letter: "ថ", trans: "тха", series: "a" },
+  { letter: "ទ", trans: "то", series: "o" },
+  { letter: "ធ", trans: "тхо", series: "o" },
+  { letter: "ន", trans: "но", series: "o" },
+  { letter: "ប", trans: "ба", series: "a" },
+  { letter: "ផ", trans: "пха", series: "a" },
+  { letter: "ព", trans: "по", series: "o" },
+  { letter: "ភ", trans: "пхо", series: "o" },
+  { letter: "ម", trans: "мо", series: "o" },
+  { letter: "យ", trans: "йо", series: "o" },
+  { letter: "រ", trans: "ро", series: "o" },
+  { letter: "ល", trans: "ло", series: "o" },
+  { letter: "វ", trans: "во", series: "o" },
+  { letter: "ស", trans: "са", series: "a" },
+  { letter: "ហ", trans: "ха", series: "a" },
+  { letter: "ឡ", trans: "ла", series: "a" },
+  { letter: "អ", trans: "а", series: "a" },
+];
+
+/**
+ * Extra/Supplemental Consonants.
+ * Typically used for loanwords.
+ * 'series' added to ensure subsequent vowels are transliterated correctly.
+ * @constant {Array<{letter: string, desc: string, trans: string, series: 'a'|'o'}>}
+ */
+const EXTRA_CONSONANTS = [
+  { letters: "ហ្គ", desc: "ха + ко", trans: "га", series: "a" },
+  { letters: "ហ្គ៊", desc: "ха + ко + трейсап", trans: "го", series: "o" },
+  { letters: "ហ្ន", desc: "ха + но", trans: "на", series: "a" },
+  { letters: "ប៉", desc: "ба + тмень-кандоль", trans: "па", series: "a" },
+  { letters: "ហ្ម", desc: "ха + мо", trans: "ма", series: "a" },
+  { letters: "ហ្ល", desc: "ха + ло", trans: "ла", series: "a" },
+  { letters: "ហ្វ", desc: "ха + во", trans: "фа", series: "a" },
+  { letters: "ហ្វ៊", desc: "ха + во + трейсап", trans: "фо", series: "o" },
+  { letters: "ហ្ស", desc: "ха + са", trans: "жа, за", series: "a" },
+  { letters: "ហ្ស៊", desc: "ха + са + трейсап", trans: "жо, зо", series: "o" },
+].map(x => ({ ...x, letters: Array.from(x.letters) }));
+
+/**
+ * Dependent Vowels.
+ * Note: The placeholder 'អ' has been stripped from keys to match diacritics in text.
+ * @constant {Array<{letter: string, trans_a: string, trans_o: string}>}
+ */
+const VOWELS = [
+  { letter: "អ", trans_a: "а", trans_o: "о" }, // Inherent (rarely matched explicitly as diacritic)
+  { letter: "ា", trans_a: "а", trans_o: "еа" },
+  { letter: "ិ", trans_a: "е", trans_o: "и" },
+  { letter: "ី", trans_a: "эй", trans_o: "и" },
+  { letter: "ឹ", trans_a: "э", trans_o: "ы" },
+  { letter: "ឺ", trans_a: "э", trans_o: "ы" },
+  { letter: "ុ", trans_a: "о", trans_o: "у" },
+  { letter: "ូ", trans_a: "оу", trans_o: "у" },
+  { letter: "ួ", trans_a: "уо", trans_o: "уо" },
+  { letter: "ើ", trans_a: "аэ", trans_o: "э" },
+  { letter: "ឿ", trans_a: "ыа", trans_o: "ыа" },
+  { letter: "ៀ", trans_a: "ие", trans_o: "ие" },
+  { letter: "េ", trans_a: "е", trans_o: "е" },
+  { letter: "ែ", trans_a: "ае", trans_o: "э" },
+  { letter: "ៃ", trans_a: "ай", trans_o: "ей" },
+  { letter: "ោ", trans_a: "ао", trans_o: "оу" },
+  { letter: "ៅ", trans_a: "ау", trans_o: "эу" },
+];
+
+/**
+ * Special Vowel Combinations.
+ * @constant {Array<{letter: string[], trans_a: string, trans_o: string}>}
+ */
+const VOWEL_COMBINATIONS = [
+  { letters: ["ុ", "ំ"], trans_a: "ом", trans_o: "ум" },
+  { letters: ["ំ"], trans_a: "ам", trans_o: "ум" },
+  { letters: ["ា", "ំ"], trans_a: "ам", trans_o: "оам" },
+  { letters: ["ះ"], trans_a: "ах", trans_o: "эах" },
+  { letters: ["ិ", "ះ"], trans_a: "ех", trans_o: "их" },
+  { letters: ["ុ", "ះ"], trans_a: "ох", trans_o: "ух" },
+  { letters: ["េ", "ះ"], trans_a: "эх", trans_o: "их" },
+  { letters: ["ោ", "ះ"], trans_a: "аох", trans_o: "уох" },
+];
+
+// ==========================================
+// TOKENIZATION
+// ==========================================
+
+// ['ស', '្', 'រ', '្', 'ត', 'ី'] =>
+const tokenize = (text) => {
+  // first detect EXTRA_CONSONANTS (several consecutive chars)
+  // then VOWEL_COMBINATIONS (several consecutive chars)
+  // then CONSONANTS
+  // then VOWELS
+};
+
+// ==========================================
+// CONTEXT ENRICHMENT (Pure)
+// ==========================================
+
+const enrichWithContext = (tokens) => {
+  return tokens.reduce(
+    (acc, token) => {
+      const isConsonant =
+        token.type === "consonant" || token.type === "extra-cons";
+      const newSeries = isConsonant ? token.data.series : acc.currentSeries;
+
+      return {
+        currentSeries: newSeries,
+        tokens: [...acc.tokens, { ...token, series: newSeries }],
+      };
+    },
+    { currentSeries: "a", tokens: [] },
+  ).tokens;
+};
+
+// ==========================================
+// RENDERING FUNCTIONS (Pure HTML Generation)
+// ==========================================
+
+const renderCharacterSplit = (token) => {
+  const classMap = {
+    consonant: token.data.series === "a" ? "cons-a" : "cons-o",
+    "extra-cons": "cons-extra",
+    vowel: "vowel",
+    "vowel-combo": "vowel",
+    unknown: "unknown",
+  };
+
+  const className = classMap[token.type] || "unknown";
+  const isItalic = token.type === "extra-cons";
+  const style = isItalic ? "font-style: italic;" : "";
+
+  return `<span class="${className}" style="${style}">${token.char}</span>`;
+};
+
+const renderTransliteration = (token) => {
+  if (token.type === "consonant" || token.type === "extra-cons") {
+    const className =
+      token.type === "extra-cons"
+        ? "cons-extra"
+        : token.data.series === "a"
+          ? "cons-a"
+          : "cons-o";
+    const style = token.type === "extra-cons" ? "font-style: italic;" : "";
+
+    return `
+      <div class="token-box">
+        <div class="token-char ${className}" style="${style}">${token.char}</div>
+        <div class="token-trans">${token.data.trans}</div>
+      </div>
+    `;
+  }
+
+  if (token.type === "vowel" || token.type === "vowel-combo") {
+    const isASeries = token.series === "a";
+    const transA = token.data.trans_a;
+    const transO = token.data.trans_o;
+
+    const aClass = isASeries ? "trans-active" : "trans-inactive";
+    const oClass = isASeries ? "trans-inactive" : "trans-active";
+
+    return `
+      <div class="token-box">
+        <div class="token-char vowel">${token.char}</div>
+        <div class="token-trans">
+          <span class="trans-option ${aClass}">${transA}</span><span class="trans-separator">/</span><span class="trans-option ${oClass}">${transO}</span>
+        </div>
+      </div>
+    `;
+  }
+
+  if (token.type === "unknown") {
+    return `
+      <div class="token-box">
+        <div class="token-char unknown">${token.char}</div>
+        <div class="token-trans">—</div>
+      </div>
+    `;
+  }
+
+  return "";
+};
+
+// ==========================================
+// MAIN EXECUTION
+// ==========================================
+
+const main = () => {
+  const wordEl = document.getElementById("word");
+  if (!wordEl) return;
+
+  const text = wordEl.innerText.trim();
+
+  // Display grapheme clusters using Intl.Segmenter
+  (() => {
+    const graphemesEl = document.getElementById("word-graphemes");
+    if (!graphemesEl) return;
+
+    try {
+      const segmenter = new Intl.Segmenter("km", { granularity: "grapheme" });
+      const graphemes = [...segmenter.segment(text)]
+        .map((x) => x.segment)
+        .join(" ");
+      graphemesEl.innerText = graphemes;
+    } catch (e) {
+      graphemesEl.innerText = "Grapheme segmentation not supported";
+    }
+  })();
+
+  // Tokenize and enrich
+  const tokens = tokenize(text);
+  const enrichedTokens = enrichWithContext(tokens);
+
+  // Display character breakdown
+  (() => {
+    const splitEl = document.getElementById("word-split");
+    if (!splitEl) return;
+
+    splitEl.innerHTML = enrichedTokens.map(renderCharacterSplit).join("");
+  })();
+
+  // Display transliteration
+  (() => {
+    const transEl = document.getElementById("word-split-ru");
+    if (!transEl) return;
+
+    transEl.innerHTML = enrichedTokens.map(renderTransliteration).join("");
+  })();
+};
+
+// Execute on load
+main();
+
+// function checkLetters(array, arrayName) {
+//   const invalidLetters = array.filter(item => Array.from(item.letter).length !== 1);
+//   if (invalidLetters.length === 0) {
+//     console.log(`${arrayName}: All letters are single characters ✅`);
+//   } else {
+//     console.log(`${arrayName}: These letters have more than one character:`);
+//     invalidLetters.forEach(item => {
+//       // Use trans, desc, or trans_a/trans_o if available
+//       const translit = item.trans || item.desc || (item.trans_a && item.trans_o ? `${item.trans_a} / ${item.trans_o}` : "N/A");
+//       console.log(`- ${item.letter} = ${JSON.stringify(Array.from(item.letter))} (${translit})`);
+//     });
+//   }
+// }
+// checkLetters(khmerConsonants, "khmerConsonants");
+// checkLetters(khmerExtraConsonants, "khmerExtraConsonants");
+// checkLetters(khmerVowels, "khmerVowels");
