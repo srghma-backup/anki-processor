@@ -1,10 +1,15 @@
+import { describe, expect, it } from "vitest";
+
 import {
   tokenize,
   Array_match,
   Array_matchMany,
   Char_mkOrThrow,
-  Token,
-} from "./anki";
+  type Token,
+  Char_mkArray,
+  enrichWithSeries,
+  renderTransliteration,
+} from "./anki.js";
 
 describe("Anki Processor Logic", () => {
   // ==========================================
@@ -31,10 +36,9 @@ describe("Anki Processor Logic", () => {
   describe("Array_match", () => {
     it("should match a sub-sequence correctly", () => {
       const result = Array_match([9, 9], [1, 9, 9, 9, 4]);
-      // Expect: [ {not_matched: [1]}, {matched: [9,9]}, {not_matched: [9,4]} ]
       expect(result).toHaveLength(3);
       expect(result[0]).toEqual({ t: "not_matched", otherSentencePart: [1] });
-      expect(result[1]).toEqual({ t: "matched", word: [9, 9] });
+      expect(result[1]).toEqual({ t: "matched" });
       expect(result[2]).toEqual({
         t: "not_matched",
         otherSentencePart: [9, 4],
@@ -53,7 +57,7 @@ describe("Anki Processor Logic", () => {
     it("should handle full match", () => {
       const result = Array_match([1, 2], [1, 2]);
       expect(result).toHaveLength(1);
-      expect(result[0]).toEqual({ t: "matched", word: [1, 2] });
+      expect(result[0]).toEqual({ t: "matched" });
     });
   });
 
@@ -119,7 +123,7 @@ describe("Anki Processor Logic", () => {
       const tokens = tokenize(input.split("") as any);
 
       expect(tokens).toHaveLength(1);
-      expect(tokens[0].t).toBe("EXTRA_CONSONANT");
+      expect(tokens[0]?.t).toBe("EXTRA_CONSONANT");
       expect(getValues(tokens)).toEqual(["ហ្គ"]);
     });
 
@@ -130,7 +134,7 @@ describe("Anki Processor Logic", () => {
       const tokens = tokenize(input.split("") as any);
 
       expect(tokens).toHaveLength(1);
-      expect(tokens[0].t).toBe("VOWEL_COMBINATION");
+      expect(tokens[0]?.t).toBe("VOWEL_COMBINATION");
       expect(getValues(tokens)).toEqual(["ុះ"]);
     });
 
@@ -160,6 +164,124 @@ describe("Anki Processor Logic", () => {
 
       expect(getTypes(tokens)).toEqual(["CONSONANT", "SPACE", "UNKNOWN"]);
       expect(getValues(tokens)).toEqual(["ក", " ", "B"]);
+    });
+  });
+
+  // ==========================================
+  // 4. Enrichment Tests
+  // ==========================================
+  describe("enrichWithSeries", () => {
+    it("should default to series 'a'", () => {
+      const tokens = tokenize(Char_mkArray("ា")); // Just a vowel
+      const enriched = enrichWithSeries(tokens);
+      expect(enriched[0]?.series).toBe("a");
+    });
+
+    it("should switch series based on standard consonants", () => {
+      // ក (Ka, a-series) + ា (Aa) + គ (Ko, o-series) + ា (Aa)
+      const text = "កាគា";
+      const tokens = tokenize(Char_mkArray(text));
+      const enriched = enrichWithSeries(tokens);
+
+      expect(enriched).toHaveLength(4);
+
+      // ក (Consonant matches definition, sets series A)
+      expect(enriched[0]?.t).toBe("CONSONANT");
+      expect(enriched[0]?.series).toBe("a");
+
+      // ា (Vowel inherits A)
+      expect(enriched[1]?.t).toBe("VOWEL");
+      expect(enriched[1]?.series).toBe("a");
+
+      // គ (Consonant matches definition, sets series O)
+      expect(enriched[2]?.t).toBe("CONSONANT");
+      expect(enriched[2]?.series).toBe("o");
+
+      // ា (Vowel inherits O)
+      expect(enriched[3]?.t).toBe("VOWEL");
+      expect(enriched[3]?.series).toBe("o");
+    });
+
+    it("should switch series based on extra consonants", () => {
+      // ហ្គ (Ga, a-series) + ា (Aa) + ហ្គ៊ (Go, o-series) + ា (Aa)
+      const text = "ហ្គាហ្គ៊ា";
+      const tokens = tokenize(Char_mkArray(text));
+      const enriched = enrichWithSeries(tokens);
+
+      expect(enriched).toHaveLength(4);
+
+      // ហ្គ (Extra Consonant, series A)
+      expect(enriched[0]?.t).toBe("EXTRA_CONSONANT");
+      expect(enriched[0]?.series).toBe("a");
+
+      // ា (Vowel inherits A)
+      expect(enriched[1]?.t).toBe("VOWEL");
+      expect(enriched[1]?.series).toBe("a");
+
+      // ហ្គ៊ (Extra Consonant, series O)
+      expect(enriched[2]?.t).toBe("EXTRA_CONSONANT");
+      expect(enriched[2]?.series).toBe("o");
+
+      // ា (Vowel inherits O)
+      expect(enriched[3]?.t).toBe("VOWEL");
+      expect(enriched[3]?.series).toBe("o");
+    });
+  });
+
+  // ==========================================
+  // 5. Renderer Tests
+  // ==========================================
+
+  describe("renderTransliteration", () => {
+    it("should render correct transliteration for consonants", () => {
+      const text = "ក"; // Ka -> ка
+      const tokens = tokenize(Char_mkArray(text));
+      const enriched = enrichWithSeries(tokens);
+      const html = renderTransliteration(enriched);
+
+      expect(html).toContain('<div class="token-trans">ка</div>');
+      expect(html).toContain("cons-a");
+    });
+
+    it("should highlight correct vowel option based on series", () => {
+      // កា (Ka + Aa -> A-series active)
+      const textA = "កា";
+      const tokensA = tokenize(Char_mkArray(textA));
+      const enrichedA = enrichWithSeries(tokensA);
+      const htmlA = renderTransliteration(enrichedA);
+
+      // ា: trans_a = "а", trans_o = "еа"
+      // Series A active: 'a' should have 'trans-active'
+      expect(htmlA).toContain(
+        '<span class="trans-option trans-active">а</span>',
+      );
+      expect(htmlA).toContain(
+        '<span class="trans-option trans-inactive">еа</span>',
+      );
+
+      // គា (Ko + Aa -> O-series active)
+      const textO = "គា";
+      const tokensO = tokenize(Char_mkArray(textO));
+      const enrichedO = enrichWithSeries(tokensO);
+      const htmlO = renderTransliteration(enrichedO);
+
+      // Series O active: 'еа' should have 'trans-active'
+      expect(htmlO).toContain(
+        '<span class="trans-option trans-inactive">а</span>',
+      );
+      expect(htmlO).toContain(
+        '<span class="trans-option trans-active">еа</span>',
+      );
+    });
+
+    it("should handle unknowns gracefully", () => {
+      const text = "ABC";
+      const tokens = tokenize(Char_mkArray(text));
+      const enriched = enrichWithSeries(tokens);
+      const html = renderTransliteration(enriched);
+
+      expect(html).toContain('<div class="token-char unknown">A</div>');
+      expect(html).toContain('<div class="token-trans">—</div>');
     });
   });
 });

@@ -1,3 +1,6 @@
+export function assertNever(x: never): never {
+  throw new Error("Unexpected object: " + JSON.stringify(x));
+}
 // ==========================================
 // 1. TYPE DEFINITIONS
 // ==========================================
@@ -166,9 +169,8 @@ export function Array_match<T extends string | number>(
 
   // Safety check: if word is empty, we can't really "match" it inside a sentence meaningfully
   // without creating infinite empty matches.
-  if (word.length === 0) {
+  if (word.length === 0)
     return [{ t: "not_matched", otherSentencePart: sentence }];
-  }
 
   while (i < sentence.length) {
     // Check if the sequence starting at i matches 'word'
@@ -192,7 +194,9 @@ export function Array_match<T extends string | number>(
       i += word.length;
     } else {
       // No match, accumulate current char
-      buffer.push(sentence[i]);
+      const c = sentence[i];
+      if (!c) throw new Error("no index");
+      buffer.push(c);
       i++;
     }
   }
@@ -205,36 +209,466 @@ export function Array_match<T extends string | number>(
   return result;
 }
 
+// ==========================================
+// 2. HELPERS
+// ==========================================
+
 export type ArrayMatchManyOutput<T> =
   | { readonly t: "matched"; readonly word: readonly T[] }
   | { readonly t: "not_matched"; readonly otherSentencePart: readonly T[] };
 
 export function Array_matchMany<T extends string | number>(
-  words: readonly (readonly T[])[], // should be ordered from longest to smallest lengths
+  words: readonly (readonly T[])[],
   sentence: readonly T[],
-): ArrayMatchOutput<T>[] {}
+): ArrayMatchManyOutput<T>[] {
+  // 1. Initialize with the entire sentence as a single unmatched segment
+  const initialSegments: ArrayMatchManyOutput<T>[] = [
+    { t: "not_matched", otherSentencePart: sentence },
+  ];
+
+  // 2. Reduce over the list of words.
+  //    For each word, we scan the current list of segments.
+  //    If a segment is already 'matched', we leave it alone.
+  //    If it is 'not_matched', we run Array_match on it to see if we can split it further.
+  return words.reduce<ArrayMatchManyOutput<T>[]>((currentSegments, word) => {
+    // Safety check for empty words to prevent infinite splitting
+    if (word.length === 0) return currentSegments;
+
+    return currentSegments.flatMap((segment) => {
+      // A. If already matched, keep it
+      if (segment.t === "matched") {
+        return [segment];
+      }
+
+      // B. If not matched, try to match the current 'word' against this segment
+      const matchResults = Array_match(word, segment.otherSentencePart);
+
+      // C. Transform the results:
+      //    Array_match returns { t: 'matched' } (without data).
+      //    We enrich this with the actual 'word' we are currently processing.
+      return matchResults.map((res): ArrayMatchManyOutput<T> => {
+        if (res.t === "matched") {
+          return { t: "matched", word: word };
+        } else {
+          return {
+            t: "not_matched",
+            otherSentencePart: res.otherSentencePart,
+          };
+        }
+      });
+    });
+  }, initialSegments);
+}
 
 // ==========================================
 // 3. LOGIC
 // ==========================================
 
-export type Token =
-  | { t: "CONSONANT"; v: readonly Char[] }
-  | { t: "EXTRA_CONSONANT"; v: readonly Char[] }
-  | { t: "VOWEL"; v: readonly Char[] }
-  | { t: "VOWEL_COMBINATION"; v: readonly Char[] }
-  | { t: "SPACE"; v: readonly Char[] }
-  | { t: "UNKNOWN"; readonly v: Char[] };
+export type TokenType =
+  | "CONSONANT"
+  | "EXTRA_CONSONANT"
+  | "VOWEL"
+  | "VOWEL_COMBINATION"
+  | "SPACE"
+  | "UNKNOWN";
+
+export type Token = { t: TokenType; v: readonly Char[] };
+
+// Internal intermediate state to track what has been tokenized and what is still raw text
+type Segment = Token | { t: "PENDING"; v: readonly Char[] };
 
 // ['ស', '្', 'រ', '្', 'ត', 'ី'] =>
+// first detect EXTRA_CONSONANTS (several consecutive chars)
+// then VOWEL_COMBINATIONS (several consecutive chars)
+// then CONSONANTS
+// then VOWELS
 export const tokenize = (text: readonly Char[]): readonly Token[] => {
-  // first detect EXTRA_CONSONANTS (several consecutive chars)
-  // then VOWEL_COMBINATIONS (several consecutive chars)
-  // then CONSONANTS
-  // then VOWELS
+  // 1. Initial State: The whole text is one PENDING segment
+  let segments: Segment[] = [{ t: "PENDING", v: text }];
+
+  // 2. Helper to apply a dictionary to all PENDING segments
+  const applyLayer = (
+    patterns: readonly (readonly Char[])[],
+    tokenType: TokenType,
+  ) => {
+    // We replace the current 'segments' list with a new list where
+    // PENDING segments have been processed by Array_matchMany
+    segments = segments.flatMap((seg) => {
+      // If already a finalized Token, keep it as is
+      if (seg.t !== "PENDING") {
+        return [seg];
+      }
+
+      // If PENDING, try to match against the current patterns
+      const matchResults = Array_matchMany(patterns, seg.v);
+
+      // Map the match results back to Segments
+      return matchResults.map((res): Segment => {
+        if (res.t === "matched") {
+          // Found a match! Convert to specific Token type
+          // We have to cast tokenType to 'any' or verify strict union matching,
+          // but logically we know tokenType matches the Token union structure.
+          return { t: tokenType, v: res.word } as const;
+        } else {
+          // Still not matched, keep as PENDING for the next layer
+          return { t: "PENDING", v: res.otherSentencePart };
+        }
+      });
+    });
+  };
+
+  // 3. Pipeline Execution (Order matters!)
+
+  // Layer A: Extra Consonants (Longest priority)
+  applyLayer(
+    EXTRA_CONSONANTS.map((x) => x.letters),
+    "EXTRA_CONSONANT",
+  );
+
+  // Layer B: Vowel Combinations
+  applyLayer(
+    VOWEL_COMBINATIONS.map((x) => x.letters),
+    "VOWEL_COMBINATION",
+  );
+
+  // Layer C: Standard Consonants (Single char, wrapped in array)
+  applyLayer(
+    CONSONANTS.map((x) => [x.letter]),
+    "CONSONANT",
+  );
+
+  // Layer D: Standard Vowels (Single char, wrapped in array)
+  applyLayer(
+    VOWELS.map((x) => [x.letter]),
+    "VOWEL",
+  );
+
+  // 4. Finalize: Convert remaining PENDING segments into SPACE or UNKNOWN tokens
+  return segments.flatMap((seg): Token[] => {
+    // Already finalized tokens pass through
+    if (seg.t !== "PENDING") return [seg];
+
+    // Process the remaining raw characters
+    const results: Token[] = [];
+    for (const char of seg.v) {
+      if (char === " ") {
+        results.push({ t: "SPACE", v: [char] });
+      } else {
+        // Fallback for symbols, numbers, or characters not in our definitions
+        results.push({ t: "UNKNOWN", v: [char] });
+      }
+    }
+    return results;
+  });
 };
 
 // ==========================================
-// 4. TEST
+// 4. TTS FUNCTIONALITY
 // ==========================================
 
+/**
+ * Speaks the given text using the Web Speech API
+ */
+const speakText = async (
+  text: string,
+  api: AnkiDroidJS | undefined,
+): Promise<void> => {
+  const lang = "km-KH";
+  const rate = 0.8;
+
+  // 1️⃣ Try AnkiDroid TTS
+  if (api && typeof api.ankiTtsSpeak === "function") {
+    try {
+      await api.ankiTtsSetLanguage(lang);
+      await api.ankiTtsSetSpeechRate(rate);
+      await api.ankiTtsSpeak(text, 0); // 0 is QUEUE_FLUSH (queue dropped), 1 is QUEUE_ADD (waited)
+      return; // successful → stop here
+    } catch (err) {
+      console.warn("AnkiDroid TTS failed, falling back:", err);
+    }
+  }
+
+  // 2️⃣ Fallback: Web Speech API
+  if (!("speechSynthesis" in window)) {
+    console.warn("No available TTS (AnkiDroid + WebSpeech both unavailable)");
+    return;
+  }
+
+  window.speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = lang;
+  utterance.rate = rate;
+  window.speechSynthesis.speak(utterance);
+};
+
+const addTTSHandlers_whole = (
+  elementId: string,
+  api: AnkiDroidJS | undefined,
+): void => {
+  const element = document.getElementById(elementId);
+  if (!element) return;
+
+  // Add TTS to main word/sentence element
+  element.style.cursor = "pointer";
+  element.addEventListener("click", (e) => {
+    e.preventDefault();
+    const text = element.innerText.trim();
+    if (text) speakText(text, api);
+  });
+};
+
+/**
+ * Adds click handlers to enable TTS on elements
+ */
+const addTTSHandlers = (
+  elementId: string,
+  elementToClick: string,
+  api: AnkiDroidJS | undefined,
+): void => {
+  const element = document.getElementById(elementId);
+  if (!element) return;
+
+  // Add TTS to individual token boxes (letters/components)
+  const tokenBoxes = element.querySelectorAll(elementToClick);
+  tokenBoxes.forEach((box) => {
+    (box as HTMLElement).style.cursor = "pointer";
+    box.addEventListener("click", (e) => {
+      e.stopPropagation(); // Prevent parent element from triggering
+      const text = box.textContent?.trim();
+      if (text) speakText(text, api);
+    });
+  });
+};
+
+// ==========================================
+// 5. RENDERERS
+// ==========================================
+
+export type EnrichedToken = Token & { readonly series: Series };
+
+export const enrichWithSeries = (
+  tokens: readonly Token[],
+): readonly EnrichedToken[] => {
+  return tokens.reduce<{
+    currentSeries: Series;
+    tokens: readonly EnrichedToken[];
+  }>(
+    (acc, token) => {
+      let newSeries = acc.currentSeries;
+
+      if (token.t === "CONSONANT") {
+        const def = CONSONANTS.find((c) => c.letter === token.v[0]);
+        if (def) newSeries = def.series;
+      } else if (token.t === "EXTRA_CONSONANT") {
+        const def = EXTRA_CONSONANTS.find(
+          (ec) =>
+            ec.letters.length === token.v.length &&
+            ec.letters.every((l, i) => l === token.v[i]),
+        );
+        if (def) newSeries = def.series;
+      }
+
+      return {
+        currentSeries: newSeries,
+        tokens: [...acc.tokens, { ...token, series: newSeries }],
+      };
+    },
+    { currentSeries: "a", tokens: [] },
+  ).tokens;
+};
+
+export const renderTransliteration = (
+  enrichedTokens: readonly EnrichedToken[],
+): string => {
+  return enrichedTokens
+    .map((token) => {
+      const text = token.v.join("");
+
+      switch (token.t) {
+        case "CONSONANT": {
+          const def = CONSONANTS.find((c) => c.letter === token.v[0]);
+          if (!def) return "";
+
+          const className = def.series === "a" ? "cons-a" : "cons-o";
+          return `
+          <div class="token-box">
+            <div class="token-char ${className}">${text}</div>
+            <div class="token-trans">${def.trans}</div>
+          </div>`;
+        }
+
+        case "EXTRA_CONSONANT": {
+          const def = EXTRA_CONSONANTS.find(
+            (ec) =>
+              ec.letters.length === token.v.length &&
+              ec.letters.every((l, i) => l === token.v[i]),
+          );
+          if (!def) return "";
+
+          return `
+          <div class="token-box">
+            <div class="token-char cons-extra"><i>${text}</i></div>
+            <div class="token-trans">${def.trans}</div>
+          </div>`;
+        }
+
+        case "VOWEL": {
+          const def = VOWELS.find((v) => v.letter === token.v[0]);
+          if (!def) return "";
+
+          const isASeries = token.series === "a";
+          const aClass = isASeries ? "trans-active" : "trans-inactive";
+          const oClass = isASeries ? "trans-inactive" : "trans-active";
+
+          return `
+          <div class="token-box">
+            <div class="token-char vowel">${text}</div>
+            <div class="token-trans">
+              <span class="trans-option ${aClass}">${def.trans_a}</span><span class="trans-separator">/</span><span class="trans-option ${oClass}">${def.trans_o}</span>
+            </div>
+          </div>`;
+        }
+
+        case "VOWEL_COMBINATION": {
+          const def = VOWEL_COMBINATIONS.find(
+            (vc) =>
+              vc.letters.length === token.v.length &&
+              vc.letters.every((l, i) => l === token.v[i]),
+          );
+          if (!def) return "";
+
+          const isASeries = token.series === "a";
+          const aClass = isASeries ? "trans-active" : "trans-inactive";
+          const oClass = isASeries ? "trans-inactive" : "trans-active";
+
+          return `
+          <div class="token-box">
+            <div class="token-char vowel">${text}</div>
+            <div class="token-trans">
+              <span class="trans-option ${aClass}">${def.trans_a}</span><span class="trans-separator">/</span><span class="trans-option ${oClass}">${def.trans_o}</span>
+            </div>
+          </div>`;
+        }
+
+        case "SPACE":
+          return `</br>`;
+
+        case "UNKNOWN":
+          return `
+          <div class="token-box">
+            <div class="token-char unknown">${text}</div>
+            <div class="token-trans">—</div>
+          </div>`;
+        default:
+          assertNever(token.t);
+      }
+    })
+    .join("");
+};
+
+// ==========================================
+// 6. MAIN EXECUTION FOR ANKI
+// ==========================================
+
+function initAnkiDroidApi(): AnkiDroidJS | undefined {
+  if (typeof AnkiDroidJS !== "undefined") {
+    try {
+      const jsApiContract = {
+        version: "0.0.3",
+        developer: "srghma@gmail.com", // <-- REQUIRED
+      };
+      return new AnkiDroidJS(jsApiContract);
+    } catch (err) {
+      console.warn("Failed to initialize AnkiDroid API:", err);
+    }
+  } else {
+    console.log("AnkiDroidJS not present — using browser fallback.");
+  }
+}
+
+const renderSingleKhmerText = (
+  textElementId: string,
+  graphemesElementId: string,
+  transliterationElementId: string,
+  api: AnkiDroidJS | undefined,
+): void => {
+  const textEl = document.getElementById(textElementId);
+  if (!textEl) return;
+
+  const text = textEl.innerText.trim();
+  if (!text) return;
+
+  const chars = Char_mkArray(text);
+
+  // 1. Render grapheme clusters
+  (() => {
+    const graphemesEl = document.getElementById(graphemesElementId);
+    if (!graphemesEl) return;
+
+    try {
+      const segmenter = new Intl.Segmenter("km", { granularity: "grapheme" });
+      const graphemes = [...segmenter.segment(text)]
+        .map((x) => (x.segment === " " ? "-" : `<span class="one-grapheme-with-audio">${x.segment}</span>`))
+        .join(" ");
+      graphemesEl.innerHTML = graphemes;
+    } catch (e) {
+      graphemesEl.innerText = "(Grapheme segmentation not supported)";
+    }
+  })();
+
+  // 2. Tokenize and enrich
+  const tokens = tokenize(chars);
+  const enrichedTokens = enrichWithSeries(tokens);
+
+  // 3. Render transliteration
+  (() => {
+    const transEl = document.getElementById(transliterationElementId);
+    if (!transEl) return;
+    transEl.innerHTML = renderTransliteration(enrichedTokens);
+  })();
+
+  // 4. Add TTS handlers after rendering
+  addTTSHandlers_whole(textElementId, api);
+  addTTSHandlers(graphemesElementId, ".one-grapheme-with-audio", api);
+  addTTSHandlers(transliterationElementId, ".token-char", api);
+};
+
+export const renderKhmerAnalysis = (): void => {
+  if (typeof document === "undefined") return;
+
+  const api = initAnkiDroidApi();
+
+  // Render main word
+  renderSingleKhmerText("word", "word-graphemes", "word-split-ru", api);
+
+  // Render example sentence (if present)
+  renderSingleKhmerText(
+    "example-sent",
+    "example-sent-graphemes",
+    "example-sent-split-ru",
+    api,
+  );
+};
+
+// ==========================================
+// EXAMPLE USAGE (for testing)
+// ==========================================
+
+// Test with word: កម្ពុជា (Cambodia)
+// const testText = "កម្ពុជា";
+// const testChars = Array.from(testText);
+// const testTokens = tokenize(testChars);
+// const testEnriched = enrichWithSeries(testTokens);
+// console.log('Tokens:', testTokens);
+// console.log('Enriched:', testEnriched);
+// console.log('HTML Split:', renderCharacterSplit(testEnriched));
+// console.log('HTML Trans:', renderTransliteration(testEnriched));
+
+// For Anki: Execute when DOM is ready
+if (typeof document !== "undefined") {
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", renderKhmerAnalysis);
+  } else {
+    renderKhmerAnalysis();
+  }
+}
